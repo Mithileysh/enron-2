@@ -1,0 +1,156 @@
+---
+title: "Enron Analysis"
+author: "E.D.S. Research Group"
+date: "May 2nd, 2016"
+output: 
+  html_document:
+    fig_height: 3
+    fig_width: 5
+---
+<!-- Don't edit in between this line and the one below -->
+```{r include=FALSE}
+# Don't delete this chunk if you are using the DataComputing package
+library(DataComputing)
+library(tm)
+library(SnowballC)
+library(wordcloud)
+library(qdap)
+library(ggthemes)
+```
+*Source file* 
+```{r, results='asis', echo=FALSE}
+includeSourceDocuments()
+```
+<!-- Don't edit the material above this line -->
+
+## Reading and Cleaning Data
+```{r, eval = FALSE}
+s = Sys.time()
+t <- c()
+
+# Reading
+inPath <- "C:/Users/Arun/Desktop/DEV/WORKSHOP/STAT133/enron/enron_full.txt"
+
+enron <- scan(file=inPath, sep="º", quote="", what=character()) %>% head(-1) %>% matrix(ncol = 6, byrow = TRUE) %>% as.data.frame(stringsAsFactors=FALSE)
+names(enron) <- c("Path", "Date", "From", "To", "Subject", "Body")
+
+dateify <- function(d) {
+    as.POSIXct(substr(d, 6, nchar(d) - 11), format = "%d %b %Y %H:%M:%S")
+}
+
+enron$Date <- dateify(enron$Date)
+
+ancient <- as.POSIXct("1998-01-01 09:22:03")
+enron <- enron %>% filter(Date >= ancient)
+
+enron_nopol <- enron
+enron <- enron %>% sample_n(size = 10000)
+
+t[1] = Sys.time() - s
+
+# Sentiment Analysis
+sp <- polarity(enron$Subject)[[1]]
+t[2] = Sys.time() - s
+bp <- polarity(enron$Body)[[1]]
+t[3] = Sys.time() - s
+enron$body.pol = bp$polarity
+enron$body.pWords = bp$pos.words
+enron$body.nWords = bp$neg.words
+enron$body.wc = bp$wc
+enron$subject.pol = sp$polarity
+enron$subject.pWords = sp$pos.words
+enron$subject.nWords = sp$neg.words
+enron$subject.wc = sp$wc
+
+path1 <- "C:/Users/Arun/Desktop/DEV/WORKSHOP/STAT133/enron/data/enron_short.rds"
+saveRDS(enron, file = path1)
+path2 <- "C:/Users/Arun/Desktop/DEV/WORKSHOP/STAT133/enron/data/enron_nopol.rds"
+saveRDS(enron_nopol, file = path2)
+path3 <- 
+t
+```
+
+## Analysis
+```{r, echo = FALSE}
+enron <- readRDS(path1)
+noPol <- readRDS(path2)
+stocks <- readRDS("C:/Users/Arun/Desktop/DEV/WORKSHOP/STAT133/enron/data/stocks.rds")
+
+topFrom <- noPol %>% filter(grepl("@enron.com", From)) %>% group_by(From) %>% summarise(Count = n()) %>% arrange(Count) %>% tail(10)
+botFrom <- noPol %>% filter(grepl("@enron.com", From)) %>% group_by(From) %>% summarise(Count = n()) %>% arrange(Count) %>% head(10)
+topTo <- noPol %>% filter(grepl("@enron.com", From)) %>% group_by(From) %>% summarise(Count = n()) %>% arrange(Count) %>% tail(10)
+botTo <- noPol %>% filter(grepl("@enron.com", From)) %>% group_by(From) %>% summarise(Count = n()) %>% arrange(Count) %>% head(10)
+
+```
+
+### Preliminary Analysis
+```{r}
+# Hour Plot
+noPol %>% ggplot(aes(x = (hour(Date) + 2)%%24)) + geom_histogram(bins = 24, center = 0.5) + ggtitle("Emails Over the Course of the Day") + xlab("Hour") + ylab("Number of Emails") + theme_gray() + theme(plot.title = element_text(face="bold", size=30))
+
+# Emails sent by entire company
+noPol %>% filter(grepl("@enron.com", From)) %>% ggplot(aes(Date)) + geom_area(aes(fill = From), stat = "bin", size = 1.25, alpha = 0.75, binwidth = 7*86400) + ggtitle("Emails Per Week") + ylab("Emails Sent") + theme(legend.position = "none", plot.title = element_text(face="bold", size=30))
+
+# jitter version of above
+noPol %>% filter(grepl("@enron.com", From)) %>% ggplot(aes(Date, 0)) + geom_jitter(col = "steelblue4", alpha = 0.4, size = 0.3) + ggtitle("Emails over Time") + theme(legend.position = "none", axis.text.y = element_blank(), axis.title.y = element_blank(), plot.title = element_text(face="bold", size=30))
+
+# Emails of Top Senders (facetted)
+noPol %>% filter(From %in% topFrom$From) %>% ggplot(aes(Date)) + facet_grid(From~.) + geom_area(aes(fill = From), stat = "bin", size = 1.25, alpha = 0.75, binwidth = 7*86400) + ggtitle("Top Senders") + ylab("Emails Sent") + theme(plot.title = element_text(face="bold", size=30))
+
+# Emails of Top Senders (overlay)
+noPol %>% filter(From %in% topFrom$From) %>% ggplot(aes(Date)) + geom_area(aes(fill = From), stat = "bin", size = 1.25, alpha = 0.75, binwidth = 7*86400) + ggtitle("Top Senders") + ylab("Emails Sent") + theme(plot.title = element_text(face="bold", size=30))
+
+# Days of the Week
+wd <- noPol %>% mutate(Day = weekdays(Date))
+wd$Day = factor(wd$Day, c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+wd %>% ggplot(aes(Day)) + geom_bar(fill = "steelblue4") + ggtitle("Emails over the Course of the Week") + ylab("Emails Sent") + theme(plot.title = element_text(face="bold", size=30))
+```
+
+### Sentiment Analysis
+```{r}
+# Polarity Distribution
+enron %>% filter(abs(body.pol) <= 5) %>% ggplot(aes(body.pol)) + geom_density(fill = "pink") + ggtitle("Polarity Distribution") + xlab("Polarity")  + theme_gray() + theme(plot.title = element_text(face="bold", size=30), axis.title.y = element_blank())
+
+# Abs. Pol., Short
+enron %>% filter(abs(body.pol) < 3) %>% ggplot(aes(Date, abs(body.pol))) + geom_jitter(aes(size = body.wc), alpha = 0.5, col = "cadetblue") + geom_smooth(col = "dodgerblue3", method = "lm", size = 1.2) + ggtitle("Absolute Polarity over Time") + xlab("Date") + ylab("Absolute Polarity")  + theme(plot.title = element_text(face="bold", size=30), legend.position = "none")
+
+# Pol over Time
+enron %>% filter(abs(body.pol) < 5) %>% ggplot(aes(Date, body.pol, size = body.wc)) + geom_point(alpha = 0.5, col = "hotpink4") + geom_smooth(col = "deeppink2", method = "lm", size = 1.3) + ggtitle("Polarity over Time") + ylab("Polarity") + theme(plot.title = element_text(face="bold", size=30), legend.position = "none")
+
+# Pol Month
+enron %>% filter(abs(body.pol) < 3) %>% mutate(Month = month(Date, label = TRUE)) %>% ggplot(aes(Month, body.pol, col = Month)) + geom_violin(size = 1.2) + stat_summary(fun.y=mean, geom="line", aes(group=1), size = 1.4, col = "gray30") + ggtitle("Polarity over the Year") + ylab("Polarity") + theme(plot.title = element_text(face="bold", size=30), legend.position = "none")
+
+# Pol Weekday
+wd <- enron %>% mutate(Day = weekdays(Date))
+wd$Day = factor(wd$Day, c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+wd %>% filter(abs(body.pol) < 3)  %>% ggplot(aes(Day, body.pol, col = Day)) + geom_violin(size = 1.2) + stat_summary(fun.y=mean, geom="line", aes(group=1), size = 1.4, col = "gray30") + ggtitle("Polarity over the Week") + ylab("Polarity") + theme(plot.title = element_text(face="bold", size=30), legend.position = "none")
+
+# User Pol
+topSen <- enron %>% group_by(From) %>% summarise(Polarity = mean(body.pol, na.rm = T)) %>% arrange(Polarity) %>% tail(10)
+topWC <- enron %>% group_by(From) %>% summarise(wc = mean(body.wc, na.rm = T)) %>% arrange(wc) %>% tail(10)
+botSen <- enron %>% group_by(From) %>% summarise(Polarity = mean(body.pol, na.rm = T)) %>% arrange(Polarity) %>% head(10)
+botWC <- enron %>% group_by(From) %>% summarise(wc = mean(body.wc, na.rm = T)) %>% arrange(wc) %>% head(10)
+
+enron %>% filter(From %in% topFrom$From, body.pol > -4) %>% ggplot(aes(From, body.pol, col=From)) + geom_jitter() + ggtitle("Top Senders' Sentiments") + ylab("Polarity") + theme(plot.title = element_text(face="bold", size=30), legend.position = "none")
+
+# Pol ~ WC
+enron %>% filter(body.wc <= 600, body.pol < 3) %>% ggplot(aes(body.wc, body.pol)) + geom_point() + ggtitle("Association between Polarity and Word Count") + xlab("Number of Words in Body") + ylab("Polarity") + theme(plot.title = element_text(face = "bold", size = 30))
+```
+
+
+### Clouds
+```{r}
+### generates a wordcloud based on a vector of text
+cloudy <- function(v, remove = c()) {
+	corp <- Corpus(VectorSource(v))
+	corp <- tm_map(corp, PlainTextDocument)
+	corp <- tm_map(corp, removePunctuation)
+	corp <- tm_map(corp, removeWords, stopwords("english"))
+	corp <- tm_map(corp, removeWords, remove)
+	wordcloud(corp, max.words = 100, random.order = FALSE)
+}
+
+falseAlarms <- c("subject", "email", "2000", "2001", "Alignrightfont", "Tuesday", "Monday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Sent", "Attached", "Orginial", "forwarded", "ToFrom", "from", "the", "pmto", "messageFrom", "for", "will", "font", "the", "Subject", "The", "PMTo", "Date", "75pt", "Forwarded", "style=", "to", "John", "November", "October", "style='padding:.75pt", "From", "2002", "forwarded", "message")
+
+cloudy(noPol$Body, remove = falseAlarms)
+```
